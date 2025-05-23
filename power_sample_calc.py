@@ -842,6 +842,7 @@ def show_test_selection_guide():
     if st.button(f"Use {test}", type="primary"):
         st.session_state["test_category"] = category
         st.session_state["selected_test"] = test
+        st.session_state["show_guide"] = False  # This is the key addition
         st.rerun()
 
 
@@ -894,13 +895,16 @@ with st.expander("About this Calculator", expanded=False):
 st.sidebar.title("Setup")
 
 # Test selection guide
-if st.sidebar.checkbox("Show Test Selection Guide", key="show_guide"):
+if st.sidebar.checkbox("Show Test Selection Guide", 
+                       key="show_guide", 
+                       value=st.session_state.get("show_guide", False)):
     show_test_selection_guide()
 else:
     # Test category selection
     categories = ["Parametric Tests", "Non-Parametric Tests"]
     category = st.sidebar.radio("**1. Select Test Category:**", categories,
                                 key="test_category",
+                                index=categories.index(st.session_state.get("test_category", "Parametric Tests")),
                                 help="Parametric: Assume specific distribution. Non-Parametric: Fewer assumptions.")
 
     # Test selection
@@ -912,7 +916,16 @@ else:
         tests = ["Mann-Whitney U Test", "Wilcoxon Signed-Rank Test", "Kruskal-Wallis Test",
                  "Fisher's Exact Test"]
 
-    selected_test = st.sidebar.radio("Select Specific Test:", tests, key="selected_test")
+    # Get the current selected test from session state, or default to first test
+    current_test = st.session_state.get("selected_test")
+    if current_test and current_test in tests:
+        default_index = tests.index(current_test)
+    else:
+        default_index = 0
+
+    selected_test = st.sidebar.radio("Select Specific Test:", tests, 
+                                   key="selected_test",
+                                   index=default_index)
 
     st.sidebar.divider()
 
