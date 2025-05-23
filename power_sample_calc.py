@@ -840,10 +840,51 @@ def show_test_selection_guide():
     st.success(f"**Recommended: {test}**")
 
     if st.button(f"Use {test}", type="primary"):
-        st.session_state["test_category"] = category
-        st.session_state["selected_test"] = test
-        st.session_state["show_guide"] = False  # This is the key addition
+        # Set the session state values using a different key to avoid conflict
+        st.session_state["selected_test_category"] = category
+        st.session_state["selected_test_name"] = test
+        st.session_state["guide_selection_made"] = True
         st.rerun()
+
+
+# Update the main sidebar section as well:
+def show_main_interface():
+    """Show the main test selection interface."""
+    # Check if user just came from the guide
+    if st.session_state.get("guide_selection_made", False):
+        # Use the selections from the guide
+        category = st.session_state.get("selected_test_category", "Parametric Tests")
+        selected_test = st.session_state.get("selected_test_name")
+        # Clear the guide selection flag
+        st.session_state["guide_selection_made"] = False
+        # Set the regular session state keys
+        st.session_state["test_category"] = category
+        st.session_state["selected_test"] = selected_test
+    
+    # Test category selection
+    categories = ["Parametric Tests", "Non-Parametric Tests"]
+    category = st.sidebar.radio("**1. Select Test Category:**", categories,
+                                key="test_category",
+                                help="Parametric: Assume specific distribution. Non-Parametric: Fewer assumptions.")
+
+    # Test selection
+    if category == "Parametric Tests":
+        tests = ["Two-Sample Independent Groups t-test", "One-Sample t-test", "Paired t-test",
+                 "Z-test: Two Independent Proportions", "Z-test: Single Proportion",
+                 "One-Way ANOVA (Between Subjects)"]
+    else:
+        tests = ["Mann-Whitney U Test", "Wilcoxon Signed-Rank Test", "Kruskal-Wallis Test",
+                 "Fisher's Exact Test"]
+
+    selected_test = st.sidebar.radio("Select Specific Test:", tests, key="selected_test")
+
+    st.sidebar.divider()
+
+    # Run calculation
+    if selected_test:
+        run_test_calculation(selected_test)
+    else:
+        st.info("👈 Please select a statistical test from the sidebar to begin.")
 
 
 # ==============================================================================
@@ -895,45 +936,10 @@ with st.expander("About this Calculator", expanded=False):
 st.sidebar.title("Setup")
 
 # Test selection guide
-if st.sidebar.checkbox("Show Test Selection Guide", 
-                       key="show_guide", 
-                       value=st.session_state.get("show_guide", False)):
+if st.sidebar.checkbox("Show Test Selection Guide", key="show_guide"):
     show_test_selection_guide()
 else:
-    # Test category selection
-    categories = ["Parametric Tests", "Non-Parametric Tests"]
-    category = st.sidebar.radio("**1. Select Test Category:**", categories,
-                                key="test_category",
-                                index=categories.index(st.session_state.get("test_category", "Parametric Tests")),
-                                help="Parametric: Assume specific distribution. Non-Parametric: Fewer assumptions.")
-
-    # Test selection
-    if category == "Parametric Tests":
-        tests = ["Two-Sample Independent Groups t-test", "One-Sample t-test", "Paired t-test",
-                 "Z-test: Two Independent Proportions", "Z-test: Single Proportion",
-                 "One-Way ANOVA (Between Subjects)"]
-    else:
-        tests = ["Mann-Whitney U Test", "Wilcoxon Signed-Rank Test", "Kruskal-Wallis Test",
-                 "Fisher's Exact Test"]
-
-    # Get the current selected test from session state, or default to first test
-    current_test = st.session_state.get("selected_test")
-    if current_test and current_test in tests:
-        default_index = tests.index(current_test)
-    else:
-        default_index = 0
-
-    selected_test = st.sidebar.radio("Select Specific Test:", tests, 
-                                   key="selected_test",
-                                   index=default_index)
-
-    st.sidebar.divider()
-
-    # Run calculation
-    if selected_test:
-        run_test_calculation(selected_test)
-    else:
-        st.info("👈 Please select a statistical test from the sidebar to begin.")
+    show_main_interface()
 
 # Footer
 st.divider()
