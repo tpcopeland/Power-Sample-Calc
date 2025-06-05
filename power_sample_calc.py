@@ -342,13 +342,25 @@ def collect_inputs(config: Dict, key: str) -> Dict:
     if inputs["goal"] != "Power":
         inputs["power"] = st.sidebar.slider("3. Desired Power (1-β)", 0.50, 0.99, 0.80, 0.01, key=f"power_{key}")
 
+    # Study objective
+    inputs["objective"] = st.sidebar.selectbox(
+        "4. Objective",
+        ["Superiority", "Non-Inferiority", "Equivalence"],
+        key=f"obj_{key}"
+    )
+
     # Alternative hypothesis
     if config.get("fixed_alt"):
         inputs["alternative"] = "two-sided"
     else:
         alt_map = {"Two-sided": "two-sided", "One-sided (larger)": "larger", "One-sided (smaller)": "smaller"}
-        alt_choice = st.sidebar.selectbox("Alternative Hypothesis", list(alt_map.keys()), key=f"alt_{key}")
+        alt_choice = st.sidebar.selectbox("5. Alternative Hypothesis", list(alt_map.keys()), key=f"alt_{key}")
         inputs["alternative"] = alt_map[alt_choice]
+
+        if inputs["objective"] == "Equivalence":
+            inputs["alternative"] = "two-sided"
+        elif inputs["objective"] == "Non-Inferiority" and inputs["alternative"] == "two-sided":
+            inputs["alternative"] = "larger"
 
     # Effect size (if not calculating MDES)
     if inputs["goal"] != "MDES":
@@ -357,16 +369,16 @@ def collect_inputs(config: Dict, key: str) -> Dict:
 
     # k groups for ANOVA/KW
     if config.get("k_groups"):
-        inputs["k_groups"] = st.sidebar.number_input("4. Number of Groups (k)", min_value=3, value=3, key=f"k_{key}")
+        inputs["k_groups"] = st.sidebar.number_input("6. Number of Groups (k)", min_value=3, value=3, key=f"k_{key}")
 
     # Sample size inputs
     if config.get("n_ratio"):
-        inputs["n_ratio"] = st.sidebar.number_input("5. Sample Size Ratio (N₂/N₁)", 0.1, 10.0, 1.0, 0.1,
+        inputs["n_ratio"] = st.sidebar.number_input("7. Sample Size Ratio (N₂/N₁)", 0.1, 10.0, 1.0, 0.1,
                                                     key=f"ratio_{key}")
 
     if inputs["goal"] != "Sample Size":
         n_label = "Sample Size (N)" if config.get("nobs_total") else "Sample Size Group 1 (N₁)"
-        inputs["n"] = st.sidebar.number_input(f"6. {n_label}", min_value=3, value=30, key=f"n_{key}")
+        inputs["n"] = st.sidebar.number_input(f"8. {n_label}", min_value=3, value=30, key=f"n_{key}")
 
     # Dropout
     if inputs["goal"] == "Sample Size":
@@ -706,8 +718,8 @@ def display_results(config: Dict, inputs: Dict, result: float):
     st.markdown("---")
     st.subheader("Summary of Inputs")
     summary = {
-        "Parameter": ["Calculation Goal", "Alpha (α)", "Alternative"],
-        "Value": [goal, inputs["alpha"], inputs["alternative"]]
+        "Parameter": ["Calculation Goal", "Objective", "Alpha (α)", "Alternative"],
+        "Value": [goal, inputs.get("objective", "Superiority"), inputs["alpha"], inputs["alternative"]]
     }
 
     if "effect_size" in inputs:
