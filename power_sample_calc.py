@@ -49,6 +49,12 @@ CITATIONS = {
                                "https://www.statisticssolutions.com/effect-size/"),
     "normal_approx_prop": ("PennState STAT 500: Normal Approximation for Binomial",
                            "https://online.stat.psu.edu/stat500/lesson/5/5.3/5.3.1"),
+    "schoenfeld": ("Schoenfeld, D. (1981). The asymptotic properties of nonparametric tests for comparing survival distributions. Biometrika, 68(1), 316-319.",
+                   "https://academic.oup.com/biomet/article-abstract/68/1/316/263254"),
+    "logrank_test": ("Wikipedia: Log-rank test",
+                     "https://en.wikipedia.org/wiki/Logrank_test"),
+    "hazard_ratio": ("Hazard Ratio - Statistics How To",
+                     "https://www.statisticshowto.com/hazard-ratio/"),
 }
 
 
@@ -184,6 +190,13 @@ def get_test_config(test_name: str) -> Dict:
             "key": "fisher", "func": "power_proportions_2indep", "effect": "cohen_h",
             "raw_inputs": ["prop1", "prop2"], "n_ratio": True, "fisher": True,
             "n_labels": ["Approx. Required N₁", "Approx. Required N₂", "Approx. Total N"]
+        },
+        # Survival Analysis
+        "Log-Rank Test": {
+            "key": "logrank", "func": "calculate_logrank_power", "effect": "hazard_ratio",
+            "raw_inputs": ["hazard_ratio", "prob_event"], "n_ratio": True,
+            "n_labels": ["Required N₁", "Required N₂", "Total N Required"],
+            "benchmarks": {"Small (HR=0.8)": 0.8, "Medium (HR=0.65)": 0.65, "Large (HR=0.5)": 0.5}
         }
     }
 
@@ -203,20 +216,9 @@ def calculate_single_proportion_power(alpha: float, alternative: str, power: Opt
                                       null_prop: Optional[float] = None, **kwargs) -> Optional[float]:
     """Manual calculation for single proportion test with improved error handling."""
 
-    # Debug information
-    debug_info = {
-        "alpha": alpha,
-        "alternative": alternative,
-        "power": power,
-        "nobs1": nobs1,
-        "sample_prop": sample_prop,
-        "null_prop": null_prop
-    }
-
     # Input validation with detailed error messages
     if sample_prop is None or null_prop is None:
         st.error("Missing proportion values. Please provide both null proportion and sample proportion.")
-        st.write("Debug info:", debug_info)
         return None
 
     if not (0 < sample_prop < 1 and 0 < null_prop < 1):
@@ -274,7 +276,129 @@ def calculate_single_proportion_power(alpha: float, alternative: str, power: Opt
 
     except Exception as e:
         st.error(f"Calculation error: {str(e)}")
-        st.write("Debug info:", debug_info)
+        return None
+
+    return None
+
+
+def calculate_logrank_power(alpha: float, alternative: str, power: Optional[float] = None,
+                            nobs1: Optional[float] = None, hazard_ratio: Optional[float] = None,
+                            prob_event: float = 0.5, ratio: float = 1.0, **kwargs) -> Optional[float]:
+    """
+    Calculate power or sample size for log-rank test using Schoenfeld's formula.
+
+    Parameters:
+    -----------
+    alpha : float
+        Significance level
+    alternative : str
+        'two-sided', 'larger', or 'smaller'
+    power : float, optional
+        Desired statistical power (for sample size calculation)
+    nobs1 : float, optional
+        Sample size in group 1 (for power calculation)
+    hazard_ratio : float
+        Expected hazard ratio (HR); HR > 1 means worse survival in group 1
+    prob_event : float
+        Probability of observing an event (default 0.5)
+    ratio : float
+        Sample size ratio N2/N1 (default 1.0 for equal groups)
+
+    Returns:
+    --------
+    float : Calculated power or sample size (N1)
+
+    Notes:
+    ------
+    Based on Schoenfeld's formula for log-rank test sample size.
+    Calculates the required number of participants, accounting for event rate.
+    """
+
+    # Input validation
+    if hazard_ratio is None or hazard_ratio <= 0:
+        st.error("Hazard ratio must be positive.")
+        return None
+
+    if hazard_ratio == 1:
+        st.error("Hazard ratio must be different from 1 (no effect).")
+        return None
+
+    if not (0 < prob_event <= 1):
+        st.error("Probability of event must be between 0 and 1.")
+        return None
+
+    try:
+        # Critical values
+        alpha_crit = alpha / 2 if alternative == "two-sided" else alpha
+        z_alpha = norm.ppf(1 - alpha_crit)
+
+        # Log hazard ratio
+        theta = np.log(hazard_ratio)
+
+        if power is None and nobs1 is not None:  # Calculate power
+            if nobs1 <= 0:
+                st.error("Sample size must be positive.")
+                return None
+
+            # Total sample size
+            n2 = nobs1 * ratio
+            n_total = nobs1 + n2
+
+            # Expected number of events
+            d = n_total * prob_event
+
+            # Proportion in each group
+            p1 = nobs1 / n_total
+            p2 = n2 / n_total
+
+            # Variance of log(HR) estimator
+            var_theta = 1 / (d * p1 * p2)
+
+            # Calculate power
+            # Test statistic under alternative: z_obs ~ N(theta/sqrt(var), 1)
+            z_obs = abs(theta) / np.sqrt(var_theta)
+
+            if alternative == "two-sided":
+                # Power = P(|Z| > z_alpha | theta != 0)
+                # = Φ(z_obs - z_alpha) + Φ(-z_obs - z_alpha)
+                result = 1 - norm.cdf(z_alpha - z_obs) + norm.cdf(-z_alpha - z_obs)
+            else:
+                # One-sided test
+                if alternative == "larger":
+                    # HR < 1, theta < 0
+                    z_obs = theta / np.sqrt(var_theta)  # Keep negative sign
+                    result = norm.cdf(z_obs - z_alpha)
+                else:
+                    # HR > 1, theta > 0
+                    z_obs = theta / np.sqrt(var_theta)
+                    result = 1 - norm.cdf(z_alpha - z_obs)
+
+            return max(0.0, min(1.0, result))
+
+        elif nobs1 is None and power is not None:  # Calculate N
+            if not 0 < power < 1:
+                st.error(f"Power must be between 0 and 1, got {power}")
+                return None
+
+            z_beta = norm.ppf(power)
+
+            # Number of events needed (Schoenfeld's formula)
+            # For two groups with allocation ratio r = n2/n1:
+            # d = (z_alpha + z_beta)² × (1 + r)² / (r × theta²)
+            # For equal allocation (r=1): d = 4 × (z_alpha + z_beta)² / theta²
+            d_needed = ((z_alpha + z_beta) ** 2) * ((1 + ratio) ** 2) / (ratio * (theta ** 2))
+
+            # Convert events to total sample size
+            n_total = d_needed / prob_event
+
+            # Calculate N1 from total N and ratio
+            # n_total = n1 + n2 = n1 + n1*ratio = n1(1 + ratio)
+            n1 = n_total / (1 + ratio)
+
+            return max(1, n1)
+
+    except Exception as e:
+        st.error(f"Calculation error in log-rank test: {str(e)}")
         return None
 
     return None
@@ -320,10 +444,6 @@ def run_test_calculation(test_name: str):
         display_results(config, inputs, result)
     else:
         st.error("Calculation failed. Please check your inputs and try again.")
-        # Show debug information for troubleshooting
-        with st.expander("Debug Information"):
-            st.write("Inputs:", inputs)
-            st.write("Configuration:", config)
 
 
 def collect_inputs(config: Dict, key: str) -> Dict:
@@ -399,6 +519,10 @@ def collect_effect_size_inputs(config: Dict, key: str) -> Dict:
     if effect_type == "wilcoxon_special":
         return handle_wilcoxon_effect_inputs(key)
 
+    # Special handling for hazard ratio (survival analysis)
+    if effect_type == "hazard_ratio":
+        return handle_hazard_ratio_inputs(config, key)
+
     # Check if raw inputs available
     raw_available = bool(config.get("raw_inputs"))
 
@@ -406,12 +530,6 @@ def collect_effect_size_inputs(config: Dict, key: str) -> Dict:
     if config.get("key") == "singleprop":
         method = "Raw Values"
         st.sidebar.info("ℹ️ Single proportion tests require actual proportion values")
-
-        # Show current inputs for debugging
-        if st.sidebar.checkbox("Show debug info", key=f"debug_{key}"):
-            st.sidebar.write("Current session state keys:")
-            debug_keys = [k for k in st.session_state.keys() if key in k]
-            st.sidebar.write(debug_keys)
     elif raw_available:
         method = st.sidebar.radio("Specify Effect via:", ["Standardized", "Raw Values"], key=f"method_{key}")
     else:
@@ -462,10 +580,6 @@ def collect_effect_size_inputs(config: Dict, key: str) -> Dict:
                     key=f"{input_name}_{key}",
                     help=f"Enter the {label.lower()}"
                 )
-
-        # Debug: Show what we collected
-        if config.get("key") == "singleprop" and st.sidebar.checkbox("Show collected values", key=f"debug_vals_{key}"):
-            st.sidebar.write("Collected raw values:", raw_vals)
 
         # Calculate effect size
         if effect_type == "cohen_h":
@@ -527,6 +641,57 @@ def handle_wilcoxon_effect_inputs(key: str) -> Dict:
         effect_inputs["is_paired"] = is_paired
         if effect_inputs["effect_size"]:
             st.sidebar.info(f"Approx. d/d_z = {effect_inputs['effect_size']:.3f}")
+
+    return effect_inputs
+
+
+def handle_hazard_ratio_inputs(config: Dict, key: str) -> Dict:
+    """Special handler for hazard ratio inputs (survival analysis)."""
+    effect_inputs = {}
+
+    st.sidebar.info("ℹ️ Hazard Ratio (HR): ratio of hazard rates between groups. HR=1 means no effect.")
+
+    # Hazard ratio input
+    benchmarks = config.get("benchmarks", {"Small (HR=0.8)": 0.8, "Medium (HR=0.65)": 0.65, "Large (HR=0.5)": 0.5})
+    preset_opts = [f"{k}" for k in benchmarks.keys()] + ["Custom"]
+    preset = st.sidebar.radio("Select Hazard Ratio:", preset_opts, index=1, key=f"preset_hr_{key}")
+
+    if preset == "Custom":
+        hr_val = st.sidebar.number_input(
+            "Hazard Ratio (HR)",
+            min_value=0.01,
+            max_value=10.0,
+            value=0.65,
+            step=0.05,
+            key=f"custom_hr_{key}",
+            help="HR < 1: reduced hazard (better survival) in Group 1. HR > 1: increased hazard (worse survival) in Group 1."
+        )
+    else:
+        # Extract HR value from preset
+        hr_val = benchmarks[preset]
+
+    effect_inputs["hazard_ratio"] = hr_val
+    effect_inputs["effect_size"] = hr_val  # Store as effect_size for compatibility
+
+    # Probability of event
+    prob_event = st.sidebar.slider(
+        "Probability of Event (per group)",
+        min_value=0.05,
+        max_value=1.0,
+        value=0.5,
+        step=0.05,
+        key=f"prob_event_{key}",
+        help="Expected proportion of participants who will experience the event during study follow-up."
+    )
+    effect_inputs["prob_event"] = prob_event
+
+    # Display interpretation
+    if hr_val < 1:
+        st.sidebar.success(f"HR = {hr_val:.2f}: {((1-hr_val)*100):.1f}% hazard reduction in Group 1")
+    elif hr_val > 1:
+        st.sidebar.warning(f"HR = {hr_val:.2f}: {((hr_val-1)*100):.1f}% hazard increase in Group 1")
+    else:
+        st.sidebar.info(f"HR = {hr_val:.2f}: No difference between groups")
 
     return effect_inputs
 
@@ -625,6 +790,18 @@ def perform_calculation(config: Dict, inputs: Dict) -> Optional[float]:
                     nobs1=n if goal != "Sample Size" else None,
                     sample_prop=raw_vals.get("sample_prop"),
                     null_prop=raw_vals.get("null_prop")
+                )
+            elif func_name == "calculate_logrank_power":
+                hazard_ratio = inputs.get("hazard_ratio")
+                prob_event = inputs.get("prob_event", 0.5)
+                result = calculate_logrank_power(
+                    alpha=alpha,
+                    alternative=alt,
+                    power=power if goal != "Power" else None,
+                    nobs1=n if goal != "Sample Size" else None,
+                    hazard_ratio=hazard_ratio,
+                    prob_event=prob_event,
+                    ratio=inputs.get("n_ratio", 1.0)
                 )
             else:  # Two proportions
                 if goal == "Sample Size":
@@ -797,6 +974,13 @@ def show_test_descriptions(test_name: str, config: Dict):
             ("Test Description", "Exact test for 2x2 tables, best for small samples.", "fishers_exact", True),
             ("Assumptions", "<ol><li>Independence</li><li>Binary outcome</li><li>Fixed margins", "fishers_exact", False),
             ("Approximation", "Uses Z-test with heuristic adjustments", "statsmodels_prop", False)
+        ],
+        "Log-Rank Test": [
+            ("Test Description", "Compares survival curves between two groups. Used for time-to-event data (e.g., time to death, disease progression, or recurrence).", "logrank_test", True),
+            ("Assumptions", "<ol><li>Independence of observations</li><li>Censoring is non-informative</li><li>Proportional hazards (hazard ratio constant over time)</li><li>Similar censoring patterns between groups", "logrank_test", False),
+            ("Effect Size", "Hazard Ratio (HR) = ratio of hazard rates. HR < 1: reduced risk in Group 1. HR > 1: increased risk in Group 1. HR = 1: no difference.<br><b>Benchmarks:</b> HR=0.80 (small, 20% reduction), HR=0.65 (medium, 35% reduction), HR=0.50 (large, 50% reduction).", "hazard_ratio", False),
+            ("Sample Size Calculation", "Uses Schoenfeld's formula. Calculates number of participants needed based on expected event rate and hazard ratio. Higher event rates require fewer participants to achieve the same number of events.", "schoenfeld", False),
+            ("Event Probability", "The probability of observing an event during follow-up affects sample size. Lower event rates require larger sample sizes to observe sufficient events for adequate power.", "schoenfeld", False)
         ]
     }
 
@@ -847,9 +1031,13 @@ def show_test_selection_guide():
             else:
                 test, category = "Fisher's Exact Test", "Non-Parametric Tests"
 
-    else:
-        st.warning("Survival analysis not supported.")
-        return
+    else:  # Time-to-event
+        groups = st.radio("**2. How many groups?**", ["Two"])
+        if groups == "Two":
+            test, category = "Log-Rank Test", "Survival Analysis"
+        else:
+            st.warning("Multi-group survival analysis not yet supported.")
+            return
 
     st.success(f"**Recommended: {test}**")
 
@@ -883,19 +1071,21 @@ def show_main_interface():
         st.session_state["selected_test"] = selected_test
     
     # Test category selection
-    categories = ["Parametric Tests", "Non-Parametric Tests"]
+    categories = ["Parametric Tests", "Non-Parametric Tests", "Survival Analysis"]
     category = st.sidebar.radio("**1. Select Test Category:**", categories,
                                 key="test_category",
-                                help="Parametric: Assume specific distribution. Non-Parametric: Fewer assumptions.")
+                                help="Parametric: Assume specific distribution. Non-Parametric: Fewer assumptions. Survival: Time-to-event data.")
 
     # Test selection
     if category == "Parametric Tests":
         tests = ["Two-Sample Independent Groups t-test", "One-Sample t-test", "Paired t-test",
                  "Z-test: Two Independent Proportions", "Z-test: Single Proportion",
                  "One-Way ANOVA (Between Subjects)"]
-    else:
+    elif category == "Non-Parametric Tests":
         tests = ["Mann-Whitney U Test", "Wilcoxon Signed-Rank Test", "Kruskal-Wallis Test",
                  "Fisher's Exact Test"]
+    else:  # Survival Analysis
+        tests = ["Log-Rank Test"]
 
     selected_test = st.sidebar.radio("Select Specific Test:", tests, key="selected_test")
 
@@ -936,7 +1126,9 @@ with st.expander("About this Calculator", expanded=False):
         - Wilcoxon Signed-Rank Test
         - Kruskal-Wallis Test
         - Fisher's Exact Test
-    - Input effect size using **standardized metrics** (Cohen's d, f, h) or **raw values** (means, medians, proportions + variability estimates).
+    - Support for **Survival Analysis**:
+        - Log-Rank Test (two-group comparison of survival curves)
+    - Input effect size using **standardized metrics** (Cohen's d, f, h, Hazard Ratio) or **raw values** (means, medians, proportions + variability estimates).
     - Tooltips and expandable sections provide **explanations** of statistical concepts, assumptions, and parameters.
     - Option to adjust sample size calculations for anticipated **dropout rates**.
     - **Summary tables** detail the inputs used for each calculation, aiding reproducibility.
@@ -950,7 +1142,7 @@ with st.expander("About this Calculator", expanded=False):
     6.  Use the **"Reset Inputs"** button in the sidebar to clear parameters for the current module and start fresh.
 
     #### Disclaimer:
-    This tool provides calculations based on established statistical formulas and approximations implemented in Python libraries (`statsmodels`, `scipy`). Approximations for non-parametric tests and Fisher's Exact test power have limitations, especially with very small samples. Results should be critically evaluated in the context of your specific research goals and assumptions. **Consultation with a qualified statistician is strongly recommended for designing critical studies or interpreting results.**
+    This tool provides calculations based on established statistical formulas and approximations implemented in Python libraries (`statsmodels`, `scipy`). Approximations for non-parametric tests and Fisher's Exact test power have limitations, especially with very small samples. Survival analysis calculations use Schoenfeld's formula and assume proportional hazards. Results should be critically evaluated in the context of your specific research goals and assumptions. **Consultation with a qualified statistician is strongly recommended for designing critical studies or interpreting results.**
     """)
 
 # Sidebar
@@ -984,4 +1176,4 @@ with st.expander("Library Versions & Reproducibility"):
     st.caption("For reproducibility, save as `requirements.txt`:")
     st.code("\n".join(versions), language='text')
 
-st.caption("Timothy P. Copeland | www.tcope.land | ©2025 | Calculator Version: 1.0 | Geneva, CH")
+st.caption("Timothy P. Copeland | www.tcope.land | ©2025 | Calculator Version: 1.1 | Geneva, CH")
