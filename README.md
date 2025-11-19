@@ -329,8 +329,8 @@ This tool is provided for educational and research purposes. While calculations 
 
 ---
 
-**Version:** 1.1
+**Version:** 1.3
 **Author:** Timothy P. Copeland
 **Location:** Geneva, Switzerland
 **Year:** 2025
-**Website:** www.tcope.land
+**Website:** https://tcope.land
