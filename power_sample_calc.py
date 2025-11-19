@@ -16,6 +16,24 @@ from statsmodels.stats.power import TTestIndPower, TTestPower, FTestAnovaPower
 ARE_FACTORS = {"wilcoxon": 0.955, "mann_whitney": 0.955, "kruskal_wallis": 0.955}
 FISHER_ADJUSTMENTS = {"power": 0.95, "n": 1.05}
 
+# Practical guidance constants
+RECRUITMENT_FEASIBILITY_THRESHOLDS = {
+    "easy": 100,
+    "moderate": 500,
+    "challenging": 1000,
+    "very_difficult": 5000
+}
+
+# Common statistical pitfalls and warnings
+COMMON_PITFALLS = {
+    "small_sample": "Small sample sizes may violate test assumptions. Consider pilot studies.",
+    "large_effect": "Very large effect sizes may be unrealistic. Verify with pilot data or literature.",
+    "small_effect": "Small effect sizes require very large samples. Consider clinical significance.",
+    "low_power": "Power below 0.80 may miss clinically important effects.",
+    "high_alpha": "Alpha > 0.05 increases Type I error risk. Justify carefully.",
+    "equal_allocation": "Unequal allocation may be more efficient with different costs or variances.",
+}
+
 # Centralized citations
 CITATIONS = {
     "cohen_1988": (
@@ -109,7 +127,7 @@ def display_results_table(data: Dict[str, List[Any]]) -> None:
 
 
 def check_expected_counts(test_type: str, n1: float, n_ratio: float, raw_inputs: Dict, show_warning: bool = False):
-    """Check expected counts for proportion tests."""
+    """Check expected counts for proportion tests with enhanced guidance."""
     if test_type == "two_prop":
         p1, p2 = raw_inputs.get("prop1"), raw_inputs.get("prop2")
         if n1 is not None and p1 is not None and p2 is not None:
@@ -117,16 +135,192 @@ def check_expected_counts(test_type: str, n1: float, n_ratio: float, raw_inputs:
             counts = [n1 * p1, n1 * (1 - p1), n2 * p2, n2 * (1 - p2)]
             min_count = min(counts)
             if min_count < 5:
-                msg = f"Expected cell count < 5 ({min_count:.1f}). Consider Fisher's Exact Test."
+                msg = f"⚠️ Expected cell count < 5 ({min_count:.1f}). The normal approximation may be inaccurate. Consider Fisher's Exact Test for small samples."
                 (st.warning if show_warning else st.sidebar.warning)(msg)
+            elif min_count < 10:
+                msg = f"ℹ️ Expected cell count between 5-10 ({min_count:.1f}). Results are approximate. Consider using exact methods if possible."
+                (st.info if show_warning else st.sidebar.info)(msg)
     elif test_type == "one_prop":
         null_p = raw_inputs.get("null_prop")
         if n1 is not None and null_p is not None:
             counts = [n1 * null_p, n1 * (1 - null_p)]
             min_count = min(counts)
             if min_count < 5:
-                msg = f"Expected count < 5 ({min_count:.1f}). Z-test may be unreliable."
+                msg = f"⚠️ Expected count < 5 ({min_count:.1f}). Z-test approximation may be unreliable. Consider exact binomial methods."
                 (st.warning if show_warning else st.sidebar.warning)(msg)
+            elif min_count < 10:
+                msg = f"ℹ️ Expected count between 5-10 ({min_count:.1f}). Normal approximation is approximate."
+                (st.info if show_warning else st.sidebar.info)(msg)
+
+
+def validate_effect_size(effect_size: float, effect_type: str, test_name: str) -> List[str]:
+    """Validate effect size and return warnings/suggestions."""
+    warnings = []
+
+    if effect_size is None or effect_size <= 0:
+        warnings.append("❌ Effect size must be positive.")
+        return warnings
+
+    # Check for unrealistically large effects
+    if effect_type in ["cohen_d_two", "cohen_d_one", "cohen_d_paired"]:
+        if effect_size > 2.0:
+            warnings.append(f"⚠️ Very large effect size ({effect_size:.2f}). Cohen's d > 2.0 is rare in most fields. Verify this is realistic for your context.")
+        elif effect_size < 0.1:
+            warnings.append(f"ℹ️ Very small effect size ({effect_size:.2f}). This will require a very large sample. Consider whether such a small effect is clinically/practically meaningful.")
+
+    elif effect_type == "cohen_f":
+        if effect_size > 0.8:
+            warnings.append(f"⚠️ Very large effect size ({effect_size:.2f}). Cohen's f > 0.8 is uncommon. Verify with pilot data or literature.")
+        elif effect_size < 0.05:
+            warnings.append(f"ℹ️ Very small effect size ({effect_size:.2f}). Large sample sizes will be required.")
+
+    elif effect_type == "cohen_h":
+        if effect_size > 1.5:
+            warnings.append(f"⚠️ Very large effect size ({effect_size:.2f}). This represents a very large difference in proportions. Verify this is realistic.")
+
+    elif effect_type == "hazard_ratio":
+        if effect_size < 0.3 or effect_size > 3.0:
+            warnings.append(f"⚠️ Extreme hazard ratio ({effect_size:.2f}). Verify this is clinically plausible for your context.")
+
+    return warnings
+
+
+def assess_recruitment_feasibility(total_n: int, test_name: str) -> str:
+    """Provide recruitment feasibility assessment."""
+    if total_n <= RECRUITMENT_FEASIBILITY_THRESHOLDS["easy"]:
+        return f"✅ **Recruitment Feasibility: Easy** (N={total_n}). This sample size is generally achievable in most settings."
+    elif total_n <= RECRUITMENT_FEASIBILITY_THRESHOLDS["moderate"]:
+        return f"⚠️ **Recruitment Feasibility: Moderate** (N={total_n}). May require multi-site recruitment or extended timeline. Consider 12-24 months for recruitment."
+    elif total_n <= RECRUITMENT_FEASIBILITY_THRESHOLDS["challenging"]:
+        return f"⚠️ **Recruitment Feasibility: Challenging** (N={total_n}). Likely requires multi-center collaboration. Consider 24-36 months for recruitment. May need to adjust design or effect size expectations."
+    elif total_n <= RECRUITMENT_FEASIBILITY_THRESHOLDS["very_difficult"]:
+        return f"🚨 **Recruitment Feasibility: Very Difficult** (N={total_n}). May be infeasible for single studies. Consider: (1) consortium approach, (2) registry-based studies, (3) adaptive designs, or (4) revising assumptions."
+    else:
+        return f"🚨 **Recruitment Feasibility: Extremely Difficult** (N={total_n}). This sample size is rarely achievable. Strongly consider alternative study designs, Bayesian approaches, or meta-analytic frameworks."
+
+
+def estimate_study_timeline(total_n: int, monthly_recruitment_rate: int = None) -> str:
+    """Estimate study timeline based on sample size."""
+    if monthly_recruitment_rate is None:
+        # Provide rough guidelines
+        if total_n <= 50:
+            return "Estimated timeline: 6-12 months (assuming typical single-site recruitment)"
+        elif total_n <= 200:
+            return "Estimated timeline: 12-24 months (assuming single or dual-site recruitment)"
+        elif total_n <= 500:
+            return "Estimated timeline: 24-36 months (likely multi-site recruitment needed)"
+        else:
+            return "Estimated timeline: 36+ months (multi-center collaboration required)"
+    else:
+        months = math.ceil(total_n / monthly_recruitment_rate)
+        years = months / 12
+        if years < 1:
+            return f"Estimated recruitment duration: {months} months (at {monthly_recruitment_rate} participants/month)"
+        else:
+            return f"Estimated recruitment duration: {years:.1f} years ({months} months) at {monthly_recruitment_rate} participants/month"
+
+
+def generate_sample_size_justification(config: Dict, inputs: Dict, result: float) -> str:
+    """Generate sample size justification text for protocols."""
+    goal = inputs["goal"]
+    if goal != "Sample Size":
+        return ""
+
+    n1 = int(np.ceil(result))
+    n_ratio = inputs.get("n_ratio", 1.0)
+    n2 = int(np.ceil(n1 * n_ratio)) if config.get("n_ratio") else None
+    k = inputs.get("k_groups", 1 if not n2 else 2)
+    total = n1 * k if not n2 else n1 + n2
+
+    test_name = st.session_state.get("selected_test", "Statistical Test")
+    alpha = inputs["alpha"]
+    power = inputs.get("power", 0.80)
+    effect = inputs.get("effect_size")
+    alt = inputs["alternative"]
+    objective = inputs.get("objective", "Superiority")
+    dropout = inputs.get("dropout", 0)
+
+    # Build justification text
+    text = f"""
+### Sample Size Justification
+
+The sample size calculation for this {objective.lower()} study using a **{test_name}** is based on the following assumptions:
+
+**Statistical Parameters:**
+- Significance level (α): {alpha} ({alt} test)
+- Desired statistical power (1-β): {power:.0%}
+- Expected effect size: {effect:.3f} {_get_effect_size_interpretation(config.get('effect'), effect)}
+
+**Sample Size:**
+"""
+
+    if n2:
+        text += f"- Group 1: {n1} participants\n"
+        text += f"- Group 2: {n2} participants\n"
+        text += f"- **Total: {total} participants**\n"
+    elif k > 2:
+        text += f"- Per group: {n1} participants\n"
+        text += f"- Number of groups: {k}\n"
+        text += f"- **Total: {total} participants**\n"
+    else:
+        text += f"- **Total: {n1} participants**\n"
+
+    if dropout > 0:
+        n1_adj = int(np.ceil(n1 / (1 - dropout / 100)))
+        total_adj = n1_adj * k if not n2 else n1_adj + int(np.ceil(n1_adj * n_ratio))
+        text += f"\n**Adjusted for {dropout}% expected dropout:**\n"
+        text += f"- **Total recruitment target: {total_adj} participants**\n"
+
+    text += f"""
+**Justification:**
+This sample size provides {power:.0%} power to detect an effect size of {effect:.3f}, which {_interpret_clinical_significance(effect, config.get('effect'))}, using a {alt} test at the {alpha} significance level.
+"""
+
+    return text
+
+
+def _get_effect_size_interpretation(effect_type: str, value: float) -> str:
+    """Get interpretation of effect size type."""
+    interpretations = {
+        "cohen_d_two": f"(Cohen's d: difference between groups)",
+        "cohen_d_one": f"(Cohen's d: difference from null value)",
+        "cohen_d_paired": f"(Cohen's d: paired difference)",
+        "cohen_h": f"(Cohen's h: difference in proportions)",
+        "cohen_f": f"(Cohen's f: ANOVA effect)",
+        "hazard_ratio": f"(Hazard Ratio)",
+        "wilcoxon_special": f"(standardized difference)"
+    }
+    return interpretations.get(effect_type, "")
+
+
+def _interpret_clinical_significance(effect_size: float, effect_type: str) -> str:
+    """Interpret clinical/practical significance of effect size."""
+    if effect_type in ["cohen_d_two", "cohen_d_one", "cohen_d_paired", "wilcoxon_special"]:
+        if effect_size < 0.2:
+            return "represents a very small effect that may have limited clinical significance"
+        elif effect_size < 0.5:
+            return "represents a small to medium effect of potential clinical relevance"
+        elif effect_size < 0.8:
+            return "represents a medium to large effect of likely clinical importance"
+        else:
+            return "represents a large effect of substantial clinical importance"
+    elif effect_type == "cohen_f":
+        if effect_size < 0.1:
+            return "represents a very small effect"
+        elif effect_size < 0.25:
+            return "represents a small to medium effect"
+        elif effect_size < 0.4:
+            return "represents a medium to large effect"
+        else:
+            return "represents a large effect"
+    elif effect_type == "hazard_ratio":
+        if 0.9 <= effect_size <= 1.1:
+            return "represents minimal difference in survival"
+        elif effect_size < 0.7 or effect_size > 1.5:
+            return "represents a substantial difference in survival with high clinical significance"
+        else:
+            return "represents a moderate difference in survival of clinical relevance"
+    return "should be evaluated for clinical/practical significance in your specific context"
 
 
 # ==============================================================================
@@ -843,8 +1037,9 @@ def perform_calculation(config: Dict, inputs: Dict) -> Optional[float]:
 
 
 def display_results(config: Dict, inputs: Dict, result: float):
-    """Display calculation results."""
+    """Display calculation results with enhanced guidance and practical context."""
     goal = inputs["goal"]
+    test_name = st.session_state.get("selected_test", "Statistical Test")
 
     st.subheader("Calculated Result:")
 
@@ -883,13 +1078,90 @@ def display_results(config: Dict, inputs: Dict, result: float):
                 with col:
                     st.metric(f"Adj. {label}", f"{val:d}", delta=f"{val - orig:d} increase")
 
+            final_total = total_adj
+        else:
+            final_total = total
+
+        # Practical Guidance for Sample Size
+        st.markdown("---")
+        st.subheader("Practical Considerations")
+
+        # Recruitment feasibility
+        feasibility = assess_recruitment_feasibility(final_total, test_name)
+        st.info(feasibility)
+
+        # Timeline estimate
+        timeline = estimate_study_timeline(final_total)
+        st.info(f"⏱️ **{timeline}**")
+
+        # Effect size validation
+        effect_size = inputs.get("effect_size")
+        if effect_size:
+            warnings = validate_effect_size(effect_size, config.get("effect", ""), test_name)
+            if warnings:
+                for warning in warnings:
+                    if "❌" in warning:
+                        st.error(warning)
+                    elif "⚠️" in warning:
+                        st.warning(warning)
+                    else:
+                        st.info(warning)
+
+        # Sample size justification
+        st.markdown("---")
+        justification = generate_sample_size_justification(config, inputs, result)
+        with st.expander("📄 Sample Size Justification (for protocols)", expanded=False):
+            st.markdown(justification)
+            st.info("💡 **Tip:** Copy this text for your study protocol or grant application. Modify as needed to fit your specific context.")
+
     elif goal == "Power":
         st.metric("Calculated Power (1-β)", f"{result:.3f}")
         st.write(f"Probability of detecting the effect: {result:.1%}")
 
+        # Power interpretation
+        st.markdown("---")
+        st.subheader("Power Interpretation")
+        if result < 0.70:
+            st.error(f"⚠️ **Low Power ({result:.1%})**: High risk of missing a true effect (Type II error). Consider increasing sample size.")
+        elif result < 0.80:
+            st.warning(f"⚠️ **Below Conventional Threshold ({result:.1%})**: Most studies aim for ≥80% power. Consider if this is adequate for your study.")
+        elif result < 0.90:
+            st.success(f"✅ **Adequate Power ({result:.1%})**: Conventional threshold met. Reasonable chance of detecting the effect if it exists.")
+        else:
+            st.success(f"✅ **High Power ({result:.1%})**: Excellent chance of detecting the effect. Sample may be larger than minimally necessary.")
+
+        # Effect size validation
+        effect_size = inputs.get("effect_size")
+        if effect_size:
+            warnings = validate_effect_size(effect_size, config.get("effect", ""), test_name)
+            if warnings:
+                st.markdown("---")
+                st.subheader("Effect Size Considerations")
+                for warning in warnings:
+                    if "❌" in warning:
+                        st.error(warning)
+                    elif "⚠️" in warning:
+                        st.warning(warning)
+                    else:
+                        st.info(warning)
+
     elif goal == "MDES":
         st.metric("MDES", f"{result:.3f}")
         st.write(f"Smallest detectable standardized effect: {result:.3f}")
+
+        # MDES interpretation
+        st.markdown("---")
+        st.subheader("MDES Interpretation")
+        effect_type = config.get("effect", "")
+        interpretation = _interpret_clinical_significance(result, effect_type)
+        st.info(f"This effect size {interpretation}")
+
+        # Practical guidance
+        if effect_type in ["cohen_d_two", "cohen_d_one", "cohen_d_paired"]:
+            if result > 0.8:
+                st.warning("⚠️ Your study can only detect large effects. Consider whether smaller, clinically relevant effects might be missed.")
+            elif result < 0.2:
+                st.success("✅ Your study is sensitive to small effects. This provides good assurance of detecting clinically meaningful differences.")
 
     # Summary table
     st.markdown("---")
@@ -914,6 +1186,45 @@ def display_results(config: Dict, inputs: Dict, result: float):
         summary["Value"].append(inputs["power"])
 
     display_results_table(summary)
+
+    # Additional practical tips
+    st.markdown("---")
+    with st.expander("💡 Best Practices & Common Pitfalls", expanded=False):
+        st.markdown("""
+        ### Best Practices for Power Analysis:
+
+        1. **Base effect sizes on pilot data or literature**: Don't guess. Use published meta-analyses or well-designed pilot studies.
+
+        2. **Be conservative**: If uncertain, use slightly larger sample sizes or lower power calculations.
+
+        3. **Account for dropout**: Always include expected dropout/attrition in your sample size calculations.
+
+        4. **Consider practical constraints**: A statistically ideal sample size that's practically infeasible is useless.
+
+        5. **Plan for interim analyses**: If you plan interim looks, adjust alpha using methods like O'Brien-Fleming or Lan-DeMets.
+
+        6. **Document all assumptions**: Keep detailed records of where effect size estimates came from and all assumptions made.
+
+        ### Common Pitfalls to Avoid:
+
+        - **Post-hoc power analysis**: Don't calculate power after the study is complete. This is generally not informative.
+
+        - **Inflated effect sizes**: Don't use overly optimistic effect sizes just to get a manageable sample size.
+
+        - **Ignoring multiple comparisons**: If testing multiple outcomes, consider adjusting for multiplicity.
+
+        - **Assuming normality without checking**: Verify distributional assumptions or use non-parametric alternatives.
+
+        - **Forgetting about clinical significance**: Statistical significance ≠ clinical importance. Always consider practical relevance.
+
+        ### Regulatory Considerations:
+
+        - **FDA/ICH E9**: Clinical trials should be adequately powered (typically 80-90%) to address primary endpoints.
+
+        - **Justify your choices**: Regulatory agencies expect detailed justification of sample sizes and power calculations.
+
+        - **Pre-specify analyses**: Register your analysis plan before data collection (e.g., clinicaltrials.gov).
+        """)
 
 
 def show_test_descriptions(test_name: str, config: Dict):
@@ -1105,44 +1416,190 @@ st.set_page_config(page_title="Power Calculator", layout="wide", initial_sidebar
 st.title("Power and Sample Size Calculator")
 
 # About section
-with st.expander("About this Calculator", expanded=False):
+with st.expander("📘 About this Calculator & User Guide", expanded=False):
     st.markdown("""
     ### Overview
 
-    This tool assists scientists, particularly in pharmaceutical and medical device research, in determining appropriate sample sizes or estimating statistical power for various study designs. It aims to be accessible even with minimal prior statistical experience.
+    This **Power and Sample Size Calculator** assists researchers, particularly in pharmaceutical, medical device, and clinical research,
+    in determining appropriate sample sizes or estimating statistical power for various study designs. It provides comprehensive
+    guidance suitable for both experienced researchers and those with limited statistical background.
 
-    #### Key Features:
-    - Calculate **Sample Size (N)**, **Statistical Power (1-β)**, or **Minimum Detectable Effect Size (MDES)**.
-    - Interactive **Test Selection Guide** to help choose the appropriate statistical test based on outcome type and study design.
-    - Support for common **Parametric Tests**:
-        - Independent Samples t-test
-        - One-Sample t-test
-        - Paired t-test
-        - Z-test for Two Independent Proportions
-        - Z-test for Single Proportion
-        - One-Way ANOVA (Between Subjects)
-    - Support for common **Non-Parametric Tests** (using ARE-based or heuristic approximations):
-        - Mann-Whitney U Test (Wilcoxon Rank-Sum)
-        - Wilcoxon Signed-Rank Test
-        - Kruskal-Wallis Test
-        - Fisher's Exact Test
-    - Support for **Survival Analysis**:
-        - Log-Rank Test (two-group comparison of survival curves)
-    - Input effect size using **standardized metrics** (Cohen's d, f, h, Hazard Ratio) or **raw values** (means, medians, proportions + variability estimates).
-    - Tooltips and expandable sections provide **explanations** of statistical concepts, assumptions, and parameters.
-    - Option to adjust sample size calculations for anticipated **dropout rates**.
-    - **Summary tables** detail the inputs used for each calculation, aiding reproducibility.
+    ### Key Features:
 
-    #### How to Use:
-    1.  **(Optional)** Check the "Show Test Selection Guide" box in the sidebar for interactive help choosing the right test.
-    2.  Select the **Test Category** (Parametric/Non-Parametric) and the specific **Statistical Test** from the sidebar menus.
-    3.  Choose what you want to **Calculate** (Sample Size, Power, or MDES).
-    4.  Enter the required parameters in the sidebar that appears for the selected test. Use the `(?)` icons next to inputs for detailed explanations.
-    5.  View the calculated **Results** and the **Summary of Inputs Used** in the main panel.
-    6.  Use the **"Reset Inputs"** button in the sidebar to clear parameters for the current module and start fresh.
+    #### Core Calculations:
+    - **Sample Size (N)**: Determine how many participants you need
+    - **Statistical Power (1-β)**: Estimate probability of detecting an effect
+    - **Minimum Detectable Effect Size (MDES)**: Find the smallest effect your study can reliably detect
 
-    #### Disclaimer:
-    This tool provides calculations based on established statistical formulas and approximations implemented in Python libraries (`statsmodels`, `scipy`). Approximations for non-parametric tests and Fisher's Exact test power have limitations, especially with very small samples. Survival analysis calculations use Schoenfeld's formula and assume proportional hazards. Results should be critically evaluated in the context of your specific research goals and assumptions. **Consultation with a qualified statistician is strongly recommended for designing critical studies or interpreting results.**
+    #### Supported Statistical Tests:
+
+    **Parametric Tests** (assume specific distributions):
+    - Two-Sample Independent Groups t-test
+    - One-Sample t-test
+    - Paired t-test (repeated measures)
+    - Z-test for Two Independent Proportions
+    - Z-test for Single Proportion
+    - One-Way ANOVA (3+ groups)
+
+    **Non-Parametric Tests** (fewer distributional assumptions, using ARE-based approximations):
+    - Mann-Whitney U Test (Wilcoxon Rank-Sum)
+    - Wilcoxon Signed-Rank Test
+    - Kruskal-Wallis Test (3+ groups)
+    - Fisher's Exact Test (small samples)
+
+    **Survival Analysis** (time-to-event data):
+    - Log-Rank Test (Schoenfeld's formula)
+
+    #### Enhanced Guidance Features:
+    - **Interactive Test Selection Guide**: Answer simple questions to identify the appropriate test
+    - **Effect Size Flexibility**: Input using standardized metrics (Cohen's d, f, h, HR) or raw values (means, SDs, proportions)
+    - **Practical Assessments**: Recruitment feasibility, timeline estimates, and study planning guidance
+    - **Sample Size Justification**: Auto-generated text for protocols and grant applications
+    - **Validation & Warnings**: Real-time checks for assumption violations and unrealistic parameters
+    - **Dropout Adjustment**: Account for participant attrition
+    - **Interpretive Guidance**: Contextual interpretation of power, effect sizes, and results
+    - **Best Practices**: Built-in reminders of common pitfalls and regulatory considerations
+
+    ### How to Use This Calculator:
+
+    #### Step 1: Choose Your Test
+    **Option A - Use the Guide (Recommended for beginners):**
+    1. Check "Show Test Selection Guide" in the sidebar
+    2. Answer questions about your outcome type and study design
+    3. Click "Use [Test Name]" to proceed
+
+    **Option B - Select Directly:**
+    1. Choose Test Category (Parametric/Non-Parametric/Survival)
+    2. Select specific test from the list
+
+    #### Step 2: Set Your Calculation Goal
+    - **Calculate Sample Size**: If you know the effect size and want to find required N
+    - **Calculate Power**: If you have a fixed sample size and want to know your detection probability
+    - **Calculate MDES**: If you have a fixed sample size and want to know the smallest detectable effect
+
+    #### Step 3: Enter Parameters
+    **Common Parameters (all tests):**
+    - **Significance Level (α)**: Usually 0.05 (5% Type I error rate)
+    - **Power (1-β)**: Usually 0.80 or 0.90 (80-90% chance of detecting effect)
+    - **Study Objective**: Superiority (prove difference), Non-Inferiority (prove not worse), or Equivalence (prove similar)
+    - **Alternative Hypothesis**: Two-sided (most common) or one-sided
+
+    **Effect Size (if calculating Sample Size or Power):**
+    - Use **Standardized** values if you know Cohen's d, f, or h from literature
+    - Use **Raw Values** if you have means, SDs, or proportions from pilot data
+    - The calculator will show benchmark values (Small, Medium, Large) based on Cohen's conventions
+
+    **Test-Specific Parameters:**
+    - Sample size ratios (for unequal groups)
+    - Number of groups (for ANOVA/Kruskal-Wallis)
+    - Event probabilities (for survival analysis)
+    - Dropout rates (adjusts sample size upward)
+
+    #### Step 4: Review Results & Guidance
+    The calculator provides:
+    - **Primary Result**: Required N, achieved power, or MDES
+    - **Practical Considerations**: Feasibility assessment and timeline estimates
+    - **Effect Size Validation**: Warnings if values seem unrealistic
+    - **Sample Size Justification**: Copy-paste text for your protocol
+    - **Summary Table**: All inputs used (for reproducibility)
+    - **Best Practices**: Reminders and pitfalls to avoid
+
+    ### Understanding Key Concepts:
+
+    #### Statistical Power (1-β)
+    The probability of correctly detecting an effect when it truly exists.
+    - **80% power**: Standard in most fields (20% risk of missing a true effect)
+    - **90% power**: Higher standard for critical studies or rare diseases
+    - Low power = high risk of "false negative" (Type II error)
+
+    #### Effect Size
+    A **standardized** measure of the magnitude of difference or relationship:
+    - **Cohen's d**: Difference between means in standard deviation units
+    - **Cohen's f**: Ratio of between-group to within-group variability (ANOVA)
+    - **Cohen's h**: Difference between proportions (transformed scale)
+    - **Hazard Ratio (HR)**: Ratio of event rates (survival analysis)
+
+    Cohen's Benchmarks (Rules of Thumb):
+    - **Small**: d=0.2, f=0.1, h=0.2
+    - **Medium**: d=0.5, f=0.25, h=0.5
+    - **Large**: d=0.8, f=0.4, h=0.8
+
+    ⚠️ **Important**: These are general guidelines. Effect sizes should be based on:
+    1. Pilot study data
+    2. Published literature in your field
+    3. Smallest clinically meaningful difference
+    4. Meta-analytic estimates
+
+    #### Significance Level (α)
+    The probability of finding an effect when none exists (Type I error/"false positive").
+    - **α = 0.05**: Standard in most fields (5% risk)
+    - **α = 0.01**: More stringent (1% risk, often used with multiple comparisons)
+    - Lower α requires larger sample sizes
+
+    #### Study Objectives:
+    - **Superiority**: Prove new treatment is better than control (most common)
+    - **Non-Inferiority**: Prove new treatment is not worse than active control (common when new treatment has other advantages like safety, cost, convenience)
+    - **Equivalence**: Prove new treatment is therapeutically similar to reference (biosimilars, generics)
+
+    ### When to Consult a Statistician:
+
+    While this calculator provides rigorous calculations, you should consult a qualified statistician for:
+    - **Critical studies**: Phase III trials, pivotal studies, regulatory submissions
+    - **Complex designs**: Cluster randomization, crossover designs, adaptive trials, interim analyses
+    - **Multiple endpoints**: Multiplicity adjustments, composite outcomes
+    - **Special populations**: Rare diseases, pediatrics (ethical considerations for sample size)
+    - **Unusual distributional assumptions**: Heavily skewed data, bounded outcomes
+    - **Protocol development**: Ensuring all statistical aspects are properly specified
+    - **Regulatory submissions**: FDA, EMA, and other agencies often require statistical review
+
+    ### Limitations & Disclaimers:
+
+    #### General Limitations:
+    - Calculations assume all statistical test assumptions are met (normality, independence, etc.)
+    - Non-parametric approximations use Asymptotic Relative Efficiency (ARE) - most accurate for large samples
+    - Fisher's Exact test power is approximated using normal theory with adjustments
+    - Survival analysis assumes proportional hazards (constant hazard ratio over time)
+
+    #### This Calculator Does NOT Handle:
+    - Cluster randomized trials (requires inflation for intra-cluster correlation)
+    - Crossover designs (requires modeling of period effects and carryover)
+    - Multiple comparison adjustments (Bonferroni, FDR, etc.)
+    - Interim analysis adjustments (O'Brien-Fleming, Lan-DeMets alpha spending)
+    - Complex adaptive designs
+    - Bayesian sample size determination
+    - Non-inferiority margins (must be specified separately)
+
+    #### Best Practice Recommendations:
+    1. **Verify assumptions**: Check that your data will meet test requirements
+    2. **Sensitivity analyses**: Try different effect size scenarios
+    3. **Document everything**: Record all assumptions and their sources
+    4. **Pilot studies**: Use pilot data to refine effect size estimates
+    5. **Pre-registration**: Register your analysis plan (e.g., clinicaltrials.gov, OSF)
+    6. **Conservative approach**: When uncertain, use larger samples
+    7. **Statistical collaboration**: Involve a statistician early in study planning
+
+    ### Reproducibility:
+
+    All calculations use established methods from:
+    - **statsmodels** (Python statistical library)
+    - **scipy** (Scientific Python)
+
+    See the "Library Versions & Reproducibility" section at the bottom for exact versions.
+
+    ### References & Further Reading:
+
+    - **Cohen, J. (1988)**. Statistical power analysis for the behavioral sciences (2nd ed.). [Classic reference for effect sizes]
+    - **ICH E9 (1998)**. Statistical principles for clinical trials. [Regulatory guideline]
+    - **Julious, S. A. (2010)**. Sample sizes for clinical trials. CRC Press. [Comprehensive guide]
+    - **Chow, S. C., et al. (2017)**. Sample size calculations in clinical research (3rd ed.). CRC Press. [Practical handbook]
+
+    ### Support & Feedback:
+
+    This calculator is provided as-is for educational and research planning purposes. Results should be validated
+    and critically evaluated by qualified researchers. For questions about statistical methods or study design,
+    consult with a biostatistician or statistical collaborator.
+
+    **Version 1.2** - Enhanced with comprehensive guidance and practical context.
     """)
 
 # Sidebar
@@ -1176,4 +1633,4 @@ with st.expander("Library Versions & Reproducibility"):
     st.caption("For reproducibility, save as `requirements.txt`:")
     st.code("\n".join(versions), language='text')
 
-st.caption("Timothy P. Copeland | www.tcope.land | ©2025 | Calculator Version: 1.1 | Geneva, CH")
+st.caption("Timothy P. Copeland | www.tcope.land | ©2025 | Calculator Version: 1.2 (Enhanced) | Geneva, CH")
