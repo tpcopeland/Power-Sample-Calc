@@ -483,13 +483,13 @@ This sample size provides {power:.0%} power to detect an effect size of {effect:
 def _get_effect_size_interpretation(effect_type: str, value: float) -> str:
     """Get interpretation of effect size type."""
     interpretations = {
-        "cohen_d_two": f"(Cohen's d: difference between groups)",
-        "cohen_d_one": f"(Cohen's d: difference from null value)",
-        "cohen_d_paired": f"(Cohen's d: paired difference)",
-        "cohen_h": f"(Cohen's h: difference in proportions)",
-        "cohen_f": f"(Cohen's f: ANOVA effect)",
-        "hazard_ratio": f"(Hazard Ratio)",
-        "wilcoxon_special": f"(standardized difference)"
+        "cohen_d_two": "(Cohen's d: difference between groups)",
+        "cohen_d_one": "(Cohen's d: difference from null value)",
+        "cohen_d_paired": "(Cohen's d: paired difference)",
+        "cohen_h": "(Cohen's h: difference in proportions)",
+        "cohen_f": "(Cohen's f: ANOVA effect)",
+        "hazard_ratio": "(Hazard Ratio)",
+        "wilcoxon_special": "(standardized difference)"
     }
     return interpretations.get(effect_type, "")
 
@@ -649,8 +649,8 @@ def calculate_repeated_measures_power(n: int, effect_size: float, alpha: float,
 
         # Warn about extreme correlations
         if correlation >= 0.95:
-            st.error(f"❌ Correlation ≥ 0.95 is too high for this approximation. Results may be invalid. "
-                    f"Please use specialized repeated measures software (G*Power, PANGEA) or consult a statistician.")
+            st.error("❌ Correlation ≥ 0.95 is too high for this approximation. Results may be invalid. "
+                     "Please use specialized repeated measures software (G*Power, PANGEA) or consult a statistician.")
             return None
 
         # Use ANOVA power calculator with adjusted parameters
@@ -726,7 +726,7 @@ def calculate_repeated_measures_n(effect_size: float, alpha: float, power: float
         # Hard stop for extreme correlations
         if correlation >= 0.95:
             st.error(
-                f"❌ Correlation ≥ 0.95 is too high for this approximation. "
+                "❌ Correlation ≥ 0.95 is too high for this approximation. "
                 "Please use specialized software for accurate sample size estimation."
             )
             return None
@@ -821,7 +821,7 @@ def calculate_assurance(n: int, alpha: float, prior_mean: float, prior_sd: float
                         alternative=alternative
                     )
                     powers.append(pwr if math.isfinite(pwr) else 0)
-                except Exception as e:
+                except Exception:
                     # Handle numerical errors gracefully during Monte Carlo simulation
                     powers.append(0)
             else:
@@ -939,7 +939,7 @@ def calculate_expected_power(n: int, alpha: float, prior_mean: float, prior_sd: 
                         alternative=alternative
                     )
                     powers.append(pwr if math.isfinite(pwr) else 0)
-                except Exception as e:
+                except Exception:
                     # Handle numerical errors gracefully during Monte Carlo simulation
                     powers.append(0)
             else:
