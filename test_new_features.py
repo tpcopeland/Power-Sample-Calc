@@ -9,7 +9,7 @@ import numpy as np
 import math
 
 # Import functions from the main module
-sys.path.insert(0, '/home/user/Power_Sample_Calc')
+sys.path.insert(0, '/home/user/Power-Sample-Calc')
 from power_sample_calc import (
     calculate_design_effect,
     calculate_clusters_needed,
