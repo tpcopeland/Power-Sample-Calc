@@ -151,7 +151,7 @@ except ValueError:
 print("\n[Test 3] Documentation - Contradictions Removed")
 print("-" * 70)
 
-with open('/home/user/Power_Sample_Calc/power_sample_calc.py', 'r') as f:
+with open('/home/user/Power-Sample-Calc/power_sample_calc.py', 'r') as f:
     content = f.read()
 
 # Check that contradictory statements are not in "Does NOT Handle" section

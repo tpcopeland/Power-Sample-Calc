@@ -30,25 +30,30 @@ def import_power_sample_calc():
         if name not in sys.modules:
             sys.modules[name] = module
 
-    try:
-        import streamlit  # type: ignore
-    except Exception:
-        class DummyModule(types.ModuleType):
-            def __getattr__(self, name):
-                if name == 'expander':
-                    class Dummy:
-                        def __enter__(self_inner):
-                            return None
-                        def __exit__(self_inner, exc_type, exc_val, exc_tb):
-                            return False
-                    return lambda *a, **k: Dummy()
-                return lambda *a, **k: None
+    # Always use mock streamlit for testing since real streamlit can't run in pytest
+    class DummyContext:
+        def __enter__(self):
+            return self
+        def __exit__(self, exc_type, exc_val, exc_tb):
+            return False
+        def __getattr__(self, name):
+            return lambda *a, **k: DummyContext()
 
-        st = DummyModule('streamlit')
-        st.sidebar = DummyModule('streamlit.sidebar')
-        st.session_state = {}
-        st.__version__ = '0'
-        ensure_module('streamlit', st)
+    class DummyModule(types.ModuleType):
+        def __getattr__(self, name):
+            if name in ('expander', 'container', 'columns', 'tabs', 'form'):
+                return lambda *a, **k: DummyContext()
+            if name == 'session_state':
+                return {}
+            return lambda *a, **k: None
+
+    st = DummyModule('streamlit')
+    st.sidebar = DummyModule('streamlit.sidebar')
+    st.session_state = {}
+    st.__version__ = '0'
+    st.set_page_config = lambda *a, **k: None
+    # Force replace streamlit module
+    sys.modules['streamlit'] = st
 
     try:
         import numpy  # type: ignore
